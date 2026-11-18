@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Joist Mailer</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <div class="logo">J</div>
+      <div><h1>Joist Mailer</h1><span class="sub">multi-account dispatch console</span></div>
+    </div>
+    <div id="pill" class="pill idle"><i></i><span>Idle</span></div>
+    <div class="controls">
+      <button class="btn go" id="bStart">▶ Start All</button>
+      <button class="btn" id="bPause">⏸ Pause</button>
+      <button class="btn go" id="bResume">⏵ Resume</button>
+      <button class="btn danger" id="bStop">■ Stop</button>
+      <button class="btn ghost" id="bRestart">↻ Restart</button>
+    </div>
+  </header>
+
+  <section class="stats">
+    <div class="stat"><label>Recipients</label><b id="sTotal">0</b></div>
+    <div class="stat"><label>Sent</label><b id="sSent" class="ok">0</b></div>
+    <div class="stat"><label>Pending</label><b id="sPend">0</b></div>
+    <div class="stat"><label>Accounts active</label><b id="sAcc">0/0</b></div>
+    <div class="stat wide">
+      <label>Progress <em id="sPct">0%</em></label>
+      <div class="bar"><div id="bar"></div></div>
+    </div>
+  </section>
+
+  <main class="grid">
+    <section class="card">
+      <div class="card-h">
+        <h2>Accounts</h2>
+        <div class="row">
+          <button class="btn sm" id="accImport">Import</button>
+          <button class="btn sm go" id="accAdd">+ Add</button>
+        </div>
+      </div>
+      <div id="accList" class="list"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-h">
+        <h2>Recipients</h2>
+        <div class="row">
+          <button class="btn sm" id="recImport">Import</button>
+          <button class="btn sm go" id="recAdd">+ Add</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <div class="seg" id="recFilter">
+          <button data-f="all" class="on">All</button>
+          <button data-f="pending">Pending</button>
+          <button data-f="sent">Sent</button>
+        </div>
+        <input id="recSearch" class="in sm" placeholder="Search…" />
+        <button class="btn sm" id="recClearSent" title="Remove sent recipients">Clear sent</button>
+        <button class="btn sm danger" id="recClearAll">Clear all</button>
+      </div>
+      <div id="recList" class="list mono"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-h">
+        <div class="tabs" id="tabs">
+          <button data-t="compose" class="on">Message</button>
+          <button data-t="settings">Settings</button>
+        </div>
+      </div>
+      <div id="tab-compose" class="pane">
+        <label class="fl">Subject</label>
+        <input id="fSubject" class="in" placeholder="Email subject" />
+        <label class="fl">Message</label>
+        <textarea id="fMessage" class="in tall" placeholder="Email body…"></textarea>
+      </div>
+      <div id="tab-settings" class="pane hide">
+        <label class="fl">Estimate name <code>ESTIMATE_NAME</code></label>
+        <input id="fEstimate" class="in" placeholder="Empty = first ISSUED estimate" />
+        <div class="two">
+          <div><label class="fl">Batch size <code>RECIPIENTS_BATCH_SIZE</code></label>
+            <input id="fBatch" type="number" min="1" class="in" /></div>
+          <div><label class="fl">Batch delay (ms) <code>BATCH_DELAY_MS</code></label>
+            <input id="fBatchDelay" type="number" min="0" class="in" placeholder="Human-like" /></div>
+        </div>
+        <div class="two">
+          <div><label class="fl">Typing delay (ms) <code>TYPING_DELAY_MS</code></label>
+            <input id="fType" type="number" min="0" class="in" placeholder="Human-like" /></div>
+          <div><label class="fl">Recipient typing (ms) <code>RECIPIENT_TYPING_DELAY_MS</code></label>
+            <input id="fRType" type="number" min="0" class="in" placeholder="Human-like" /></div>
+        </div>
+        <label class="fl">Chrome path (optional)</label>
+        <input id="fChrome" class="in mono" placeholder="Auto-detect" />
+        <p class="hint">Leave a number field empty for a human-like random delay. <b>0</b> = instant. Settings apply live — you can change them while running and they take effect from the next batch.</p>
+      </div>
+    </section>
+  </main>
+
+  <section class="logs">
+    <div class="card-h"><h2>Activity</h2><button class="btn sm" id="logClear">Clear</button></div>
+    <div id="logBox" class="logbox mono"></div>
+  </section>
+</div>
+
+<dialog id="dlg">
+  <form method="dialog" id="dlgForm">
+    <h3 id="dlgTitle"></h3>
+    <p class="hint" id="dlgHint"></p>
+    <textarea id="dlgText" class="in mono tall"></textarea>
+    <div class="row end">
+      <button class="btn" value="cancel" type="submit">Cancel</button>
+      <button class="btn go" id="dlgOk" value="ok" type="submit">Add</button>
+    </div>
+  </form>
+</dialog>
+<div id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>

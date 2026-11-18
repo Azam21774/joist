@@ -1,0 +1,46 @@
+{
+  "name": "joist-mailer",
+  "version": "1.0.0",
+  "description": "Multi-account Joist estimate mailer (Electron + IPC + CDP)",
+  "author": "Joist Mailer",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win portable --x64",
+    "dist:all": "electron-builder --mac --win portable --x64"
+  },
+  "dependencies": {
+    "puppeteer-core": "^24.0.0"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.joist.mailer",
+    "productName": "Joist Mailer",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": "portable",
+      "signAndEditExecutable": false,
+      "artifactName": "JoistMailer-${version}-win-portable.${ext}"
+    }
+  }
+}
