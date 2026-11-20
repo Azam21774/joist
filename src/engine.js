@@ -81,11 +81,32 @@ async function waitForCdp(port, proc, timeout = 20000) {
   throw new Error("Chrome's CDP port is not responding.");
 }
 
+// ---------------------------------------------------------------- Background-safe waits
+// Puppeteer's waitForSelector({visible}) polls with requestAnimationFrame, which never fires
+// in a background/occluded window. These use a plain 250ms interval instead.
+function waitSel(page, selector, { visible = false, hidden = false, timeout = 30000 } = {}) {
+  return page.waitForFunction(
+    (sel, vis, hid) => {
+      const el = document.querySelector(sel);
+      let shown = false;
+      if (el) {
+        const st = getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        shown = st.visibility !== 'hidden' && st.display !== 'none' && r.width > 0 && r.height > 0;
+      }
+      if (hid) return !el || !shown;
+      return vis ? shown : !!el;
+    },
+    { polling: 250, timeout },
+    selector, visible, hidden
+  );
+}
+
 // ---------------------------------------------------------------- Human-like helpers
 async function humanClick(page, target) {
   const el = typeof target === 'string' ? await page.$(target) : target;
   if (!el) throw new Error('Element to click not found.');
-  await el.evaluate(n => n.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+  await el.evaluate(n => n.scrollIntoView({ block: 'center', behavior: 'instant' }));
   await rawSleep(rand(400, 800));
   const box = await el.boundingBox();
   if (!box) throw new Error('Element has no visible box.');
@@ -147,7 +168,7 @@ class Engine extends EventEmitter {
     this._st = null;
 
     this.d.accounts.forEach(a => { a.status = 'idle'; a.note = ''; });
-    this.d.recipients.forEach(r => { if (r.status === 'sending') r.status = 'pending'; });
+    this.d.recipients.forEach(r => { if (r.status === 'sending') r.status = 'pending'; if (!r.id) r.id = crypto.randomUUID(); });
   }
 
   get d() { return this.store.data; }
@@ -164,7 +185,7 @@ class Engine extends EventEmitter {
   }
   emitState() {
     if (this._st) return;
-    this._st = setTimeout(() => { this._st = null; this.emit('state'); }, 80);
+    this._st = setTimeout(() => { this._st = null; this.emit('state'); }, 200);
   }
   log(msg, level = 'info') {
     const entry = { t: Date.now(), level, msg };
@@ -183,24 +204,22 @@ class Engine extends EventEmitter {
 
   // ---- recipients
   addRecipients(text) {
-    const have = new Set(this.d.recipients.map(r => r.email.toLowerCase()));
-    let added = 0, dup = 0, bad = 0;
+    // duplicates are kept on purpose — every entry is its own recipient
+    let added = 0, bad = 0;
     for (const raw of String(text).split(/[\s,;]+/)) {
       const email = raw.trim();
       if (!email) continue;
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { bad++; continue; }
-      if (have.has(email.toLowerCase())) { dup++; continue; }
-      have.add(email.toLowerCase());
-      this.d.recipients.push({ email, status: 'pending' });
+      this.d.recipients.push({ id: crypto.randomUUID(), email, status: 'pending' });
       added++;
     }
     this.store.save(); this.emitState();
-    this.log(`Recipients: ${added} added${dup ? `, ${dup} duplicate skipped` : ''}${bad ? `, ${bad} invalid skipped` : ''}.`);
-    return { added, dup, bad };
+    this.log(`Recipients: ${added} added${bad ? `, ${bad} invalid skipped` : ''}.`);
+    return { added, dup: 0, bad };
   }
-  removeRecipients(emails) {
-    const set = new Set(emails);
-    this.d.recipients = this.d.recipients.filter(r => !(set.has(r.email) && r.status !== 'sending'));
+  removeRecipients(ids) {
+    const set = new Set(ids);
+    this.d.recipients = this.d.recipients.filter(r => !(set.has(r.id) && r.status !== 'sending'));
     this.store.save(); this.emitState();
   }
   clearRecipients(scope = 'all') {
@@ -239,6 +258,16 @@ class Engine extends EventEmitter {
     fs.rm(path.join(this.dir, 'profiles', id), { recursive: true, force: true }, () => {});
     this.store.save(); this.emitState();
     this.log(`Account removed: ${a.email}`, 'warn');
+  }
+
+  async removeAllAccounts() {
+    const ids = this.d.accounts.map(a => a.id);
+    if (!ids.length) return;
+    await Promise.all(ids.map(id => this.closeRuntime(id)));
+    this.d.accounts = [];
+    for (const id of ids) fs.rm(path.join(this.dir, 'profiles', id), { recursive: true, force: true }, () => {});
+    this.store.save(); this.emitState();
+    this.log(`All ${ids.length} accounts removed.`, 'warn');
   }
 
   async closeRuntime(id) {
@@ -288,6 +317,12 @@ class Engine extends EventEmitter {
           '--no-default-browser-check',
           '--disable-infobars',
           '--start-maximized',
+          // keep windows fully active even when hidden behind other windows
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--disable-ipc-flooding-protection',
+          '--disable-features=CalculateNativeWinOcclusion,MacWebContentsOcclusion',
           'about:blank'
         ],
         { stdio: 'ignore' }
@@ -311,10 +346,15 @@ class Engine extends EventEmitter {
       const page = (await browser.pages())[0] || (await browser.newPage());
       page.setDefaultTimeout(30000);
       entry.page = page;
+      try {
+        // make the page believe it always has focus, so typing/clicking works in the background
+        entry.cdp = await page.createCDPSession();
+        await entry.cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+      } catch {}
 
       await this._login(page, a);
       await this._openEstimate(page, a);
-      await page.waitForSelector(EMAIL_BUTTON_SELECTOR, { visible: true, timeout: 30000 });
+      await waitSel(page, EMAIL_BUTTON_SELECTOR, { visible: true, timeout: 30000 });
 
       this.setStatus(a, 'active', 'Ready');
       this.log(`Ready: ${a.email} (login + estimate open)`, 'success');
@@ -338,8 +378,8 @@ class Engine extends EventEmitter {
   async _login(page, a) {
     await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
     const where = await Promise.race([
-      page.waitForSelector('input[name="email"]', { visible: true, timeout: 15000 }).then(() => 'login'),
-      page.waitForFunction(() => location.pathname.includes('/dashboard'), { timeout: 15000 }).then(() => 'dash')
+      waitSel(page, 'input[name="email"]', { visible: true, timeout: 15000 }).then(() => 'login'),
+      page.waitForFunction(() => location.pathname.includes('/dashboard'), { polling: 250, timeout: 15000 }).then(() => 'dash')
     ]).catch(() => null);
     if (!where) throw new Error('Joist login page failed to load.');
     if (where === 'dash') return; // session already saved in this profile
@@ -349,11 +389,11 @@ class Engine extends EventEmitter {
     await rawSleep(rand(400, 900));
     await humanType(page, 'input[name="password"]', a.password);
     await rawSleep(rand(700, 1500));
-    await page.waitForSelector(LOGIN_BUTTON_SELECTOR, { visible: true });
+    await waitSel(page, LOGIN_BUTTON_SELECTOR, { visible: true });
     if (await page.$eval(LOGIN_BUTTON_SELECTOR, b => b.disabled)) throw new Error('Sign In button disabled.');
     await humanClick(page, LOGIN_BUTTON_SELECTOR);
     try {
-      await page.waitForFunction(() => location.pathname.includes('/dashboard'), { timeout: 25000 });
+      await page.waitForFunction(() => location.pathname.includes('/dashboard'), { polling: 250, timeout: 25000 });
     } catch {
       throw new Error('Login failed — check the email/password.');
     }
@@ -363,7 +403,7 @@ class Engine extends EventEmitter {
     if (!page.url().includes('/estimates')) {
       await page.goto(ESTIMATES_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
     }
-    await page.waitForSelector(ROW_SELECTOR, { visible: true, timeout: 30000 });
+    await waitSel(page, ROW_SELECTOR, { visible: true, timeout: 30000 });
     await rawSleep(rand(1200, 2200));
 
     const rows = await page.$$eval(ROW_SELECTOR, rs =>
@@ -405,10 +445,10 @@ class Engine extends EventEmitter {
       await page.reload({ waitUntil: 'domcontentloaded' });
     }
     chk();
-    await page.waitForSelector(EMAIL_BUTTON_SELECTOR, { visible: true, timeout: 30000 });
+    await waitSel(page, EMAIL_BUTTON_SELECTOR, { visible: true, timeout: 30000 });
     await rawSleep(rand(1000, 2000));
     await humanClick(page, EMAIL_BUTTON_SELECTOR);
-    await page.waitForSelector(TO_INPUT_SELECTOR, { visible: true, timeout: 20000 });
+    await waitSel(page, TO_INPUT_SELECTOR, { visible: true, timeout: 20000 });
     await rawSleep(rand(800, 1500));
     chk();
 
@@ -438,14 +478,14 @@ class Engine extends EventEmitter {
     chk();
 
     await rawSleep(rand(800, 1500));
-    await page.waitForSelector(SEND_BUTTON_SELECTOR, { visible: true, timeout: 15000 });
+    await waitSel(page, SEND_BUTTON_SELECTOR, { visible: true, timeout: 15000 });
     chk(); // last abort point — after the click the batch counts as sent
     await humanClick(page, SEND_BUTTON_SELECTOR);
     batch.forEach(r => (r.status = 'sent'));
     this.store.save(); this.emitState();
 
     await rawSleep(2000);
-    try { await page.waitForSelector(TO_INPUT_SELECTOR, { hidden: true, timeout: 15000 }); } catch {}
+    try { await waitSel(page, TO_INPUT_SELECTOR, { hidden: true, timeout: 15000 }); } catch {}
     await rawSleep(rand(1200, 2200));
   }
 

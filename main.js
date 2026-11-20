@@ -56,13 +56,14 @@ app.whenReady().then(() => {
   ipcMain.handle('accounts:open', (_e, id) => { engine.startAccount(id); return true; }); // non-blocking
   ipcMain.handle('accounts:close', (_e, id) => engine.closeAccount(id));
   ipcMain.handle('accounts:remove', (_e, id) => engine.removeAccount(id));
+  ipcMain.handle('accounts:removeAll', () => engine.removeAllAccounts());
 
   ipcMain.handle('recipients:add', (_e, text) => engine.addRecipients(text));
   ipcMain.handle('recipients:import', async () => {
     const t = await pickTextFile('recipients.txt');
     return t == null ? null : engine.addRecipients(t);
   });
-  ipcMain.handle('recipients:remove', (_e, emails) => engine.removeRecipients(emails));
+  ipcMain.handle('recipients:remove', (_e, ids) => engine.removeRecipients(ids));
   ipcMain.handle('recipients:clear', (_e, scope) => engine.clearRecipients(scope));
 
   ipcMain.handle('run:start', () => engine.start());

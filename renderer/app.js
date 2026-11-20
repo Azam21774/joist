@@ -21,6 +21,20 @@ function toast(msg, err) {
 }
 
 // ------------------------------------------------------------ render
+const _cache = new WeakMap();
+function setHtml(el, html) {
+  if (_cache.get(el) === html) return; // nothing changed -> don't touch the DOM
+  const top = el.scrollTop;
+  el.innerHTML = html;
+  el.scrollTop = top;
+  _cache.set(el, html);
+}
+let _raf = 0;
+function scheduleRender() {
+  if (_raf) return;
+  _raf = requestAnimationFrame(() => { _raf = 0; render(); });
+}
+
 function render() {
   const st = S.run.state;
   const rec = S.recipients;
@@ -54,10 +68,10 @@ function renderAccounts() {
   const st = S.run.state;
   const box = $('#accList');
   if (!S.accounts.length) {
-    box.innerHTML = '<div class="empty">No accounts yet.<br>Click “+ Add” and enter email:password.</div>';
+    setHtml(box, '<div class="empty">No accounts yet.<br>Click “+ Add” and enter email:password.</div>');
     return;
   }
-  box.innerHTML = S.accounts.map(a => {
+  setHtml(box, S.accounts.map(a => {
     const canOpen = !['connecting', 'busy'].includes(a.status);
     const live = ['running', 'waiting', 'pausing', 'paused'].includes(st);
     const openLbl = a.status === 'active' ? 'Focus' : live ? 'Open / Login' : '▶ Start';
@@ -73,7 +87,7 @@ function renderAccounts() {
         <button class="btn sm danger" data-act="remove" data-id="${a.id}">Remove</button>
       </div>
     </div>`;
-  }).join('');
+  }).join(''));
 }
 
 function renderRecipients() {
@@ -83,15 +97,15 @@ function renderRecipients() {
     (!q || r.email.toLowerCase().includes(q)));
   const box = $('#recList');
   if (!rows.length) {
-    box.innerHTML = `<div class="empty">${S.recipients.length ? 'Nothing matches this filter.' : 'No recipients yet.<br>Use “+ Add” or Import.'}</div>`;
+    setHtml(box, `<div class="empty">${S.recipients.length ? 'Nothing matches this filter.' : 'No recipients yet.<br>Use “+ Add” or Import.'}</div>`);
     return;
   }
-  box.innerHTML = rows.slice(0, MAX_ROWS).map(r => `
+  setHtml(box, rows.slice(0, MAX_ROWS).map(r => `
     <div class="rec"><span class="e" title="${esc(r.email)}">${esc(r.email)}</span>
       <span class="st ${r.status}">${r.status}</span>
-      <button class="x" data-rm="${esc(r.email)}" ${r.status === 'sending' ? 'disabled' : ''} title="Remove">✕</button>
+      <button class="x" data-rm="${esc(r.id)}" ${r.status === 'sending' ? 'disabled' : ''} title="Remove">✕</button>
     </div>`).join('') +
-    (rows.length > MAX_ROWS ? `<div class="more">+ ${rows.length - MAX_ROWS} more (use search or filter)</div>` : '');
+    (rows.length > MAX_ROWS ? `<div class="more">+ ${rows.length - MAX_ROWS} more (use search or filter)</div>` : ''));
 }
 
 function addLog(l) {
@@ -155,6 +169,11 @@ $('#accAdd').onclick = async () => {
   const t = await bulkDialog({ title: 'Add accounts', hint: 'One per line: email:password', placeholder: 'user1@mail.com:password1\nuser2@mail.com:password2' });
   if (t) report(await api.accounts.add(t), 'account');
 };
+$('#accRemoveAll').onclick = () => {
+  if (!S.accounts.length) return toast('No accounts to remove.', true);
+  const live = ['running', 'waiting', 'pausing', 'paused'].includes(S.run.state);
+  if (confirm(`Remove all ${S.accounts.length} accounts? Their Chrome windows will be closed.` + (live ? '\n\nA run is in progress — it will wait until you add an active account.' : ''))) api.accounts.removeAll();
+};
 $('#accImport').onclick = async () => report(await api.accounts.import(), 'account');
 $('#recAdd').onclick = async () => {
   const t = await bulkDialog({ title: 'Add recipients', hint: 'One per line, or comma-separated', placeholder: 'a@mail.com\nb@mail.com, c@mail.com' });
@@ -216,6 +235,6 @@ $('#bRestart').onclick = run(async () => {
   fillForm(S.settings);
   logs.forEach(addLog);
   render();
-  api.onState(s => { S = s; render(); });
+  api.onState(s => { S = s; scheduleRender(); });
   api.onLog(addLog);
 })();

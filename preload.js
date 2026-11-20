@@ -18,12 +18,13 @@ contextBridge.exposeInMainWorld('api', {
     import: () => inv('accounts:import'),
     open: id => inv('accounts:open', id),
     close: id => inv('accounts:close', id),
-    remove: id => inv('accounts:remove', id)
+    remove: id => inv('accounts:remove', id),
+    removeAll: () => inv('accounts:removeAll')
   },
   recipients: {
     add: t => inv('recipients:add', t),
     import: () => inv('recipients:import'),
-    remove: emails => inv('recipients:remove', emails),
+    remove: ids => inv('recipients:remove', ids),
     clear: scope => inv('recipients:clear', scope)
   },
   run: {
